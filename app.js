@@ -311,7 +311,8 @@ function computeBrief(s, brands) {
   const score = total ? Math.round(earned / total * 100) : 100;
   const slot = String(s.b_brand || "none");
   const bl = slot !== "none" && brands && brands[slot] ? brandLine(brands[slot]) : "";
-  const forWhom = biz ? `for ${biz}${type ? `, ${/^[aeiou]/i.test(type) ? "an" : "a"} ${type}` : ""}` : (type ? `for a ${type}` : "for my business");
+  const art = (w) => (/^[aeiou]/i.test(w) ? "an" : "a");
+  const forWhom = biz ? `for ${biz}${type ? `, ${art(type)} ${type}` : ""}` : (type ? `for ${art(type)} ${type}` : "for my business");
   const parts = [AI_OPENERS[ai], `${job.verb} ${forWhom}.`];
   parts.push(offer ? `The goal or offer: ${offer}.` : "The goal or offer: [say what you want people to do].");
   if (aud) parts.push(`The audience: ${aud}.`);
@@ -336,6 +337,7 @@ function renderBrief(r, out) {
 
 /* Tool 5 */
 function validHex(c) { return /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(String(c || "").trim()); }
+const BRAND_COLOR_KEYS = ["k_c1", "k_c2", "k_c3"];
 const BRAND_WEIGHTS = [["k_name", 15], ["k_url", 5], ["k_c1", 15], ["k_c2", 10], ["k_c3", 5], ["k_font", 10], ["k_tone", 10], ["k_products", 10], ["k_audience", 5], ["k_claims", 10], ["k_never", 5]];
 function computeBrandSheet(s) {
   s = s || {};
@@ -343,10 +345,10 @@ function computeBrandSheet(s) {
   let score = 0; const missing = [];
   BRAND_WEIGHTS.forEach(([k, w]) => {
     let ok = !!v(k);
-    if (k.startsWith("k_c") && ok && !validHex(v(k))) ok = false;
+    if (BRAND_COLOR_KEYS.includes(k) && ok && !validHex(v(k))) ok = false;
     if (ok) score += w; else missing.push(k);
   });
-  const badColors = ["k_c1", "k_c2", "k_c3"].filter((k) => v(k) && !validHex(v(k)));
+  const badColors = BRAND_COLOR_KEYS.filter((k) => v(k) && !validHex(v(k)));
   const L = (label, val) => (val ? `${label}: ${val}` : "");
   const colors = ["k_c1", "k_c2", "k_c3"].map((k, i) => (validHex(v(k)) ? `${["Primary", "Secondary", "Accent"][i]} ${v(k).toUpperCase()}` : "")).filter(Boolean).join(", ");
   const text = ["BRAND KIT" + (v("k_name") ? " — " + v("k_name") : ""), L("Website", v("k_url")), L("Colors", colors), L("Fonts", v("k_font")), L("Voice and tone", v("k_tone")),
@@ -369,7 +371,7 @@ const REV_CATS = [
   { id: "headline", label: "on-screen text", kw: ["headline", "title", "text", "copy", "wording", "tagline", "slogan", "caption", "subtitle"] },
   { id: "cta", label: "call to action", kw: ["button", "call to action", "cta", "price", "booking", "sign up", "offer"] },
   { id: "music", label: "music", kw: ["music", "song", "soundtrack", "beat", "jingle", "score"] },
-  { id: "voice", label: "voiceover", kw: ["voice", "narrat", "accent", "speaker", "read"] },
+  { id: "voice", label: "voiceover", kw: ["voice", "narrat", "accent", "speaker"] },
   { id: "background", label: "background", kw: ["background", "backdrop", "setting", "location", "scenery"] },
   { id: "brand", label: "colors and brand styling", kw: ["color", "colour", "palette", "font", "logo", "brand"] },
   { id: "length", label: "length and pacing", kw: ["shorter", "longer", "length", "duration", "seconds", "faster", "slower", "pace", "trim", "shorten", "lengthen"] },
@@ -377,7 +379,8 @@ const REV_CATS = [
 ];
 const VAGUE = ["pop", "better", "nicer", "professional", "feels off", "wow", "improve", "fix it", "something", "more modern", "not right", "different"];
 const WHOLE = ["redo", "start over", "everything", "all of it", "whole", "from scratch", "completely", "entire", "regenerate", "again"];
-function hasWord(low, w) { return low.includes(w); }
+function hasPhrase(low, w) { return new RegExp("\\b" + w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\b").test(low); }
+function hasWord(low, w) { return new RegExp("\\b" + w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).test(low); }
 function computeRevisions(s) {
   s = s || {};
   const asset = String(s.r_asset || "video");
@@ -389,8 +392,8 @@ function computeRevisions(s) {
     scored.sort((a, b) => b.score - a.score || a.idx - b.idx);
     const best = scored[0] || null;
     const tie = !!(best && scored[1] && scored[1].score === best.score);
-    const whole = WHOLE.some((w) => hasWord(low, w));
-    const vague = VAGUE.some((w) => hasWord(low, w));
+    const whole = WHOLE.some((w) => hasPhrase(low, w));
+    const vague = VAGUE.some((w) => hasPhrase(low, w));
     let risk = "low", el = best ? best.c.label : null, instruction;
     if (whole) risk = "high"; else if (vague || !best) risk = "medium";
     const keepTxt = keep ? `Keep everything else exactly as it is, including ${keep}.` : "Keep everything else exactly as it is.";
@@ -718,21 +721,19 @@ function defineTools() {
       ${fld("Approved claims", inp("k_claims", "text", ""))}
       ${fld("Never say", inp("k_never", "text", ""))}`,
     compute: computeBrandSheet, render: renderBrandSheet,
-    onChange: (ev, ctx) => {
-      if (ev.target.dataset.k !== "k_slot") return;
-      const fields = ctx.root.querySelectorAll('[data-k]:not([data-k="k_slot"])');
-      const newSlot = ev.target.value;
-      const snap = {}; fields.forEach((el) => { snap[el.dataset.k] = el.value; });
-      ctx.extra.brands[ctx.extra.slot] = snap;
-      const next = ctx.extra.brands[newSlot] || {};
-      fields.forEach((el) => { el.value = next[el.dataset.k] || ""; });
-      ctx.extra.slot = newSlot;
-    },
     beforeRefresh: (ctx) => {
-      const slot = ctx.root.querySelector('[data-k="k_slot"]').value;
-      ctx.extra.slot = slot;
-      const snap = {}; ctx.root.querySelectorAll('[data-k]:not([data-k="k_slot"])').forEach((el) => { snap[el.dataset.k] = el.value; });
-      ctx.extra.brands[slot] = snap;
+      const fields = ctx.root.querySelectorAll('[data-k]:not([data-k="k_slot"])');
+      const chosen = ctx.root.querySelector('[data-k="k_slot"]').value;
+      const snap = {}; fields.forEach((el) => { snap[el.dataset.k] = el.value; });
+      if (chosen !== ctx.extra.slot) {
+        // slot switched: park the fields in the slot we were on, load the chosen one
+        ctx.extra.brands[ctx.extra.slot] = snap;
+        const next = ctx.extra.brands[chosen] || {};
+        fields.forEach((el) => { el.value = next[el.dataset.k] || ""; });
+        ctx.extra.slot = chosen;
+      } else {
+        ctx.extra.brands[chosen] = snap;
+      }
     },
     getPayload: (s) => { const p = { ...s }; delete p.brands; delete p.slot; return p; },
     applyPayload: (ctx, p) => { const keep = { brands: ctx.extra.brands, slot: ctx.extra.slot }; const q = { ...p }; delete q.k_slot; ctx.write(q); ctx.extra.brands = keep.brands; ctx.extra.slot = keep.slot; },
