@@ -1,2 +1,2 @@
-# superplugai
+# plugpilot
 SuperPlugAI JV Bonus App
